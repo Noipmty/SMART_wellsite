@@ -14,13 +14,20 @@ from pydantic import BaseModel, Field
 
 from apps.container import Container
 from libs.api import (
+    BadRequestError,
     NotFoundError,
     Page,
     PageParams,
     ServiceUnavailableError,
     pagination_params,
 )
-from libs.schemas.kb import IndexStatus, KBChunk, KBDocument
+from libs.schemas.kb import (
+    CandidateStatus,
+    IndexStatus,
+    KBCandidate,
+    KBChunk,
+    KBDocument,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -167,3 +174,99 @@ async def search_knowledge(body: SearchRequest, request: Request) -> list[Search
     )
     logger.info("kb.api_search", query=body.query, hits=len(hits))
     return [SearchHit(**h) for h in hits]
+
+
+# ---------------- 候选沉淀队列（自进化管道） ----------------
+
+class ApproveRequest(BaseModel):
+    """采纳候选：审核人必填，可选编辑标题/正文/tags/类型。"""
+
+    reviewer: str = Field(min_length=1, max_length=64)
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    text: str | None = Field(default=None, min_length=1, max_length=20000)
+    tags: list[str] | None = Field(default=None, max_length=20)
+    doc_type: DocType | None = None
+
+
+class RejectRequest(BaseModel):
+    reviewer: str = Field(min_length=1, max_length=64)
+    review_note: str = Field(min_length=1, max_length=500)
+
+
+class DistillTraceRequest(BaseModel):
+    """从链路追踪手动沉淀问答候选。"""
+
+    trace_id: str = Field(min_length=1)
+
+
+class ApproveResult(BaseModel):
+    candidate: KBCandidate
+    document: DocumentView
+    graph_rebuild: str = "triggered"
+
+
+@router.get("/candidates", response_model=Page[KBCandidate])
+async def list_candidates(
+    request: Request,
+    params: PageParams = Depends(pagination_params),
+    status: CandidateStatus | None = Query(None, description="按审核状态过滤"),
+) -> Page[KBCandidate]:
+    """候选队列（按创建时间倒序，分页）。"""
+    container = _get_container(request)
+    candidates = await container.kb_candidate_repo.query(status=status)
+    items = candidates[params.offset : params.offset + params.limit]
+    return Page.build(items, total=len(candidates), params=params)
+
+
+@router.post("/candidates/distill", response_model=KBCandidate, status_code=201)
+async def distill_trace(body: DistillTraceRequest, request: Request) -> KBCandidate:
+    """从一条 trace 手动沉淀问答候选（幂等：同一 trace 不重复生成）。"""
+    container = _get_container(request)
+    record = await container.trace_repo.get(body.trace_id)
+    if record is None:
+        raise NotFoundError(f"链路不存在：{body.trace_id}")
+    if not record.results:
+        raise BadRequestError(
+            f"链路无节点结论，无可沉淀内容：{body.trace_id}")
+    best = max(record.results, key=lambda r: r.confidence)
+    evidence_text = "；".join(
+        f"{e.metric}={e.value}" for r in record.results
+        for e in r.evidence[:2] if e.value is not None
+    )
+    candidate, created = await container.kb_service.submit_candidate(
+        source_type="trace", source_id=record.trace_id,
+        title=f"问答沉淀：{record.question[:30]}",
+        doc_type="案例",
+        source_ref=f"链路 {record.trace_id}",
+        text=(f"问题：{record.question}\n结论：{best.conclusion}\n"
+              f"依据：{evidence_text or best.suggestion or '见节点结论'}"),
+    )
+    if not created:
+        logger.info("kb.api_distill_dedup", trace_id=record.trace_id)
+    return candidate
+
+
+@router.post("/candidates/{candidate_id}/approve", response_model=ApproveResult)
+async def approve_candidate(candidate_id: str, body: ApproveRequest,
+                            request: Request) -> ApproveResult:
+    """采纳候选：可选编辑后正式入库（READY），并触发图谱增量重建。"""
+    container = _get_container(request)
+    overrides = body.model_dump(exclude_none=True, exclude={"reviewer"})
+    candidate, doc = await container.kb_service.approve_candidate(
+        candidate_id, body.reviewer, overrides or None
+    )
+    await container.graph_service.rebuild(background=True)
+    logger.info("kb.api_candidate_approved", candidate_id=candidate_id,
+                doc_id=doc.doc_id, reviewer=body.reviewer)
+    return ApproveResult(candidate=candidate,
+                         document=DocumentView.from_doc(doc))
+
+
+@router.post("/candidates/{candidate_id}/reject", response_model=KBCandidate)
+async def reject_candidate(candidate_id: str, body: RejectRequest,
+                           request: Request) -> KBCandidate:
+    """驳回候选（终态，附驳回原因）。"""
+    container = _get_container(request)
+    return await container.kb_service.reject_candidate(
+        candidate_id, body.reviewer, body.review_note
+    )

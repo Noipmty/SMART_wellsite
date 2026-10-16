@@ -15,7 +15,13 @@ from libs.schemas.alerts import (
     WorkOrder,
     WorkOrderStatus,
 )
-from libs.schemas.kb import KBChunk, KBDocument, IndexStatus
+from libs.schemas.kb import (
+    CandidateStatus,
+    KBCandidate,
+    KBChunk,
+    KBDocument,
+    IndexStatus,
+)
 from libs.schemas.enums import (
     DETERMINISTIC_AGENTS,
     LLM_AGENTS,
@@ -66,6 +72,8 @@ __all__ = [
     "KBDocument",
     "KBChunk",
     "IndexStatus",
+    "KBCandidate",
+    "CandidateStatus",
     "DiagnosisOutput",
     "ProductionOutput",
     "RiskOutput",

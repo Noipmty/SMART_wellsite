@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from libs.schemas.kb import KBChunk, KBDocument, IndexStatus
+from libs.schemas.kb import (
+    CandidateStatus,
+    KBCandidate,
+    KBChunk,
+    KBDocument,
+    IndexStatus,
+)
 from repositories.base import InMemoryRepository
 
 
@@ -52,3 +58,29 @@ class KBChunkRepository(InMemoryRepository[KBChunk]):
 
     async def list_ready(self, ready_doc_ids: set[str]) -> list[KBChunk]:
         return await self.list(lambda c: c.doc_id in ready_doc_ids)
+
+
+class KBCandidateRepository(InMemoryRepository[KBCandidate]):
+    """candidate_id → KBCandidate；按状态过滤，按创建时间倒序。"""
+
+    async def save(self, candidate: KBCandidate) -> KBCandidate:
+        return await self.add(candidate.candidate_id, candidate)
+
+    async def get_by_id(self, candidate_id: str) -> KBCandidate | None:
+        return await self.get(candidate_id)
+
+    async def find_by_source(self, source_type: str,
+                             source_id: str) -> KBCandidate | None:
+        """按幂等键查找已沉淀候选。"""
+        items = await self.list(
+            lambda c: c.source_type == source_type and c.source_id == source_id
+        )
+        return items[0] if items else None
+
+    async def query(self,
+                    status: CandidateStatus | None = None) -> list[KBCandidate]:
+        items = await self.list(
+            (lambda c: c.status is status) if status else None
+        )
+        items.sort(key=lambda c: c.created_at, reverse=True)
+        return items

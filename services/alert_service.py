@@ -28,6 +28,11 @@ from libs.schemas.alerts import (
 )
 from repositories.alert_repo import AlertRepository, WorkOrderRepository
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # 避免运行时循环依赖
+    from services.kb_service import KBService
+
 logger = structlog.get_logger(__name__)
 
 # 等级 → 通知渠道 / 目标
@@ -90,6 +95,11 @@ class AlertService:
         self._dedup = AlertDeduplicator(window_minutes=dedup_window_minutes)
         self._sweep_interval = sweep_interval
         self._sweep_task: asyncio.Task | None = None
+        self._kb: "KBService | None" = None
+
+    def set_kb_service(self, kb: "KBService") -> None:
+        """注入知识库服务（容器装配时调用），启用经验自进化沉淀钩子。"""
+        self._kb = kb
 
     # ---------------- 告警接入 ----------------
 
@@ -133,6 +143,10 @@ class AlertService:
                 await self._alerts.update(alert.alert_id, _hit)
                 logger.info("alert.dedup_hit", alert_id=alert.alert_id,
                             count=outcome.count, escalated=outcome.escalated)
+                # 高频同源告警（窗口内 ≥3 次）→ 沉淀风险处置要点候选（幂等）
+                if outcome.count >= 3:
+                    await self._distill_frequent_alert(
+                        outcome.dedup_key, source, cause, scope, outcome.count)
                 return alert, False
 
         alert = Alert(
@@ -244,13 +258,59 @@ class AlertService:
     async def close_order(self, order_id: str, operator: str,
                           actual_cause: str) -> WorkOrder:
         """关闭工单（resolved → closed），回填实际原因形成闭环。"""
-        return await self._transition_order(
+        order = await self._transition_order(
             order_id, WorkOrderStatus.CLOSED, operator,
             lambda o, now: (
                 setattr(o, "actual_cause", actual_cause),
                 setattr(o, "closed_at", now),
             ),
         )
+        # 工单闭环 → 沉淀处置案例候选（幂等，失败不影响主流程）
+        await self._distill_closed_order(order)
+        return order
+
+    # ---------------- 经验沉淀钩子（自进化管道） ----------------
+
+    async def _distill_closed_order(self, order: WorkOrder) -> None:
+        """闭环工单 → 案例候选：现象/处置/实际原因三要素。"""
+        if self._kb is None:
+            return
+        try:
+            alert = await self._alerts.get_by_id(order.alert_id)
+            phenomenon = (alert.content or alert.cause) if alert else order.title
+            scope = order.well_id or (alert.scope if alert else "") or "井场"
+            await self._kb.submit_candidate(
+                source_type="workorder", source_id=order.order_id,
+                title=f"{scope} 处置案例：{order.title}",
+                doc_type="案例",
+                source_ref=f"工单 {order.order_id}",
+                text=(f"现象：{phenomenon}（等级 {order.priority}）。\n"
+                      f"处置：{order.resolution or '按规程处置'}。\n"
+                      f"实际原因：{order.actual_cause}。"),
+                tags=[t for t in (scope, order.priority) if t],
+            )
+        except Exception:  # noqa: BLE001 - 沉淀失败不影响工单闭环
+            logger.exception("kb.distill_order_failed", order_id=order.order_id)
+
+    async def _distill_frequent_alert(self, dedup_key: str, source: str,
+                                      cause: str, scope: str, count: int) -> None:
+        """高频同源告警 → 风险处置要点候选（幂等键=去重键）。"""
+        if self._kb is None:
+            return
+        try:
+            await self._kb.submit_candidate(
+                source_type="alert_dedup", source_id=dedup_key,
+                title=f"高频告警处置要点：{cause}",
+                doc_type="案例",
+                source_ref=f"告警聚合 {dedup_key}",
+                text=(f"来源 {source} 在 {scope or '井场'} 范围内"
+                      f"去重窗口内反复出现（{count} 次）。\n"
+                      f"原因：{cause}。\n建议纳入巡检重点并复核根因，"
+                      "必要时升级工艺改造。"),
+                tags=[t for t in (scope, source) if t],
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("kb.distill_alert_failed", dedup_key=dedup_key)
 
     async def _transition_order(
         self, order_id: str, target: WorkOrderStatus, operator: str,

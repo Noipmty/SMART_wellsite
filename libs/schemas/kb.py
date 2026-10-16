@@ -55,3 +55,35 @@ class KBChunk(BaseModel):
     text: str
     tags: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=_utcnow)
+
+
+class CandidateStatus(str, Enum):
+    """候选知识审核状态机：pending → approved / rejected（终态）。"""
+
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class KBCandidate(BaseModel):
+    """候选知识条目（自进化沉淀队列）。
+
+    由运行数据自动沉淀生成（工单闭环 / 高频告警 / trace 手动沉淀），
+    必须经审核采纳后才正式入库——LLM/规则生成内容不直接进知识库。
+    (source_type, source_id) 为幂等键，同一来源不重复生成。
+    """
+
+    candidate_id: str = Field(default_factory=lambda: _uid("cand"))
+    source_type: str           # workorder / alert_dedup / trace
+    source_id: str             # 来源实体 id（工单号 / 去重键 / trace_id）
+    title: str
+    doc_type: str = "案例"
+    source_ref: str = ""
+    text: str
+    tags: list[str] = Field(default_factory=list)
+    status: CandidateStatus = CandidateStatus.PENDING
+    doc_id: str | None = None  # 采纳后生成的文档 id
+    review_note: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: datetime | None = None
+    created_at: datetime = Field(default_factory=_utcnow)

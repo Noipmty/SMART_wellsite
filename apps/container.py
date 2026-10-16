@@ -17,7 +17,11 @@ from libs.llm import MockLLMClient
 from libs.llm.base import LLMClient
 from repositories.alert_repo import AlertRepository, WorkOrderRepository
 from repositories.graph_repo import GraphRepository
-from repositories.kb_repo import KBChunkRepository, KBDocumentRepository
+from repositories.kb_repo import (
+    KBCandidateRepository,
+    KBChunkRepository,
+    KBDocumentRepository,
+)
 from repositories.trace_repo import TraceRepository
 from services.alert_service import AlertService
 from services.graph_service import GraphService
@@ -40,6 +44,7 @@ class Container:
     alert_service: AlertService
     kb_doc_repo: KBDocumentRepository
     kb_chunk_repo: KBChunkRepository
+    kb_candidate_repo: KBCandidateRepository
     kb_service: KBService
     graph_repo: GraphRepository
     graph_service: GraphService
@@ -63,8 +68,10 @@ class Container:
 
         kb_doc_repo = KBDocumentRepository()
         kb_chunk_repo = KBChunkRepository()
-        kb_service = KBService(kb_doc_repo, kb_chunk_repo)
+        kb_candidate_repo = KBCandidateRepository()
+        kb_service = KBService(kb_doc_repo, kb_chunk_repo, kb_candidate_repo)
         await kb_service.seed_defaults()
+        alert_service.set_kb_service(kb_service)  # 启用经验自进化沉淀钩子
 
         graph_repo = GraphRepository()
         graph_service = GraphService(graph_repo, kb_doc_repo, kb_chunk_repo)
@@ -86,6 +93,7 @@ class Container:
             alert_service=alert_service,
             kb_doc_repo=kb_doc_repo,
             kb_chunk_repo=kb_chunk_repo,
+            kb_candidate_repo=kb_candidate_repo,
             kb_service=kb_service,
             graph_repo=graph_repo,
             graph_service=graph_service,

@@ -16,9 +16,19 @@ from datetime import datetime, timezone
 
 import structlog
 
-from libs.api.errors import NotFoundError
-from libs.schemas.kb import IndexStatus, KBChunk, KBDocument
-from repositories.kb_repo import KBChunkRepository, KBDocumentRepository
+from libs.api.errors import ConflictError, NotFoundError
+from libs.schemas.kb import (
+    CandidateStatus,
+    IndexStatus,
+    KBCandidate,
+    KBChunk,
+    KBDocument,
+)
+from repositories.kb_repo import (
+    KBCandidateRepository,
+    KBChunkRepository,
+    KBDocumentRepository,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -77,9 +87,11 @@ class KBService:
     """知识库领域服务（每个依赖容器持有一个实例）。"""
 
     def __init__(self, doc_repo: KBDocumentRepository,
-                 chunk_repo: KBChunkRepository) -> None:
+                 chunk_repo: KBChunkRepository,
+                 candidate_repo: KBCandidateRepository | None = None) -> None:
         self._docs = doc_repo
         self._chunks = chunk_repo
+        self._candidates = candidate_repo or KBCandidateRepository()
         self._tasks: set[asyncio.Task] = set()
 
     # ---------------- 上传与索引 ----------------
@@ -175,12 +187,15 @@ class KBService:
         chunks = await self._chunks.list_ready(set(doc_map))
 
         scored: list[tuple[int, KBChunk]] = []
+        # 词级命中：查询分词后任一 ≥2 字词完整出现在正文（避免单字误命中，
+        # 又避免 tag/title 硬门槛挡住自进化新知识）
+        tokens = [t for t in re.split(r"[^0-9A-Za-z一-鿿]+", query) if len(t) >= 2]
         for chunk in chunks:
             doc = doc_map[chunk.doc_id]
             tag_score = sum(2 for tag in chunk.tags if tag in query)
             title_score = 3 if doc.title in query else 0
             base = tag_score + title_score
-            if base == 0:
+            if base == 0 and not any(t in chunk.text for t in tokens):
                 continue
             char_score = sum(1 for ch in set(query)
                              if ch.strip() and ch in chunk.text)
@@ -229,3 +244,98 @@ class KBService:
             )
         logger.info("kb.seeded", count=len(KB_ENTRIES))
         return len(KB_ENTRIES)
+
+    # ---------------- 候选沉淀（自进化管道） ----------------
+
+    async def submit_candidate(
+        self,
+        source_type: str,
+        source_id: str,
+        title: str,
+        text: str,
+        doc_type: str = "案例",
+        source_ref: str = "",
+        tags: list[str] | None = None,
+    ) -> tuple[KBCandidate, bool]:
+        """沉淀一条候选知识（幂等：同一来源不重复生成）。
+
+        返回 (候选, 是否新建)；已存在时直接返回原候选，供高频钩子安全重入。
+        """
+        existing = await self._candidates.find_by_source(source_type, source_id)
+        if existing is not None:
+            return existing, False
+        candidate = KBCandidate(
+            source_type=source_type, source_id=source_id,
+            title=title, doc_type=doc_type, source_ref=source_ref,
+            text=text, tags=extract_tags(title + "\n" + text, tags),
+        )
+        await self._candidates.save(candidate)
+        logger.info("kb.candidate_submitted", candidate_id=candidate.candidate_id,
+                    source_type=source_type, source_id=source_id)
+        return candidate, True
+
+    async def approve_candidate(
+        self,
+        candidate_id: str,
+        reviewer: str,
+        overrides: dict | None = None,
+    ) -> tuple[KBCandidate, KBDocument]:
+        """采纳候选：可选编辑后正式入库（同步索引即 READY）。
+
+        仅 pending 可采纳，终态重复操作抛 409。
+        """
+        candidate = await self._candidates.get_by_id(candidate_id)
+        if candidate is None:
+            raise NotFoundError(f"候选知识不存在：{candidate_id}")
+        if candidate.status is not CandidateStatus.PENDING:
+            raise ConflictError(
+                f"候选已处于终态 {candidate.status.value}，不可重复审核",
+                details={"candidate_id": candidate_id,
+                         "status": candidate.status.value},
+            )
+        overrides = overrides or {}
+        doc = await self.create_document(
+            title=overrides.get("title", candidate.title),
+            doc_type=overrides.get("doc_type", candidate.doc_type),
+            source_ref=candidate.source_ref or f"候选 {candidate.candidate_id}",
+            text=overrides.get("text", candidate.text),
+            tags=overrides.get("tags", candidate.tags),
+            background=False,
+        )
+        now = datetime.now(timezone.utc)
+
+        def _mark(c: KBCandidate) -> None:
+            c.status = CandidateStatus.APPROVED
+            c.doc_id = doc.doc_id
+            c.reviewed_by = reviewer
+            c.reviewed_at = now
+
+        await self._candidates.update(candidate_id, _mark)
+        logger.info("kb.candidate_approved", candidate_id=candidate_id,
+                    doc_id=doc.doc_id, reviewer=reviewer)
+        return await self._candidates.get_by_id(candidate_id), doc  # type: ignore[return-value]
+
+    async def reject_candidate(self, candidate_id: str, reviewer: str,
+                               review_note: str) -> KBCandidate:
+        """驳回候选（pending → rejected，终态）。"""
+        candidate = await self._candidates.get_by_id(candidate_id)
+        if candidate is None:
+            raise NotFoundError(f"候选知识不存在：{candidate_id}")
+        if candidate.status is not CandidateStatus.PENDING:
+            raise ConflictError(
+                f"候选已处于终态 {candidate.status.value}，不可重复审核",
+                details={"candidate_id": candidate_id,
+                         "status": candidate.status.value},
+            )
+        now = datetime.now(timezone.utc)
+
+        def _mark(c: KBCandidate) -> None:
+            c.status = CandidateStatus.REJECTED
+            c.review_note = review_note
+            c.reviewed_by = reviewer
+            c.reviewed_at = now
+
+        await self._candidates.update(candidate_id, _mark)
+        logger.info("kb.candidate_rejected", candidate_id=candidate_id,
+                    reviewer=reviewer)
+        return await self._candidates.get_by_id(candidate_id)  # type: ignore[return-value]
