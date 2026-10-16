@@ -146,3 +146,128 @@ async def test_trace_query_filters_by_time_window():
 
     all_records = await repo.query()
     assert [r.trace_id for r in all_records] == ["tr-t0", "tr-t1", "tr-t2"]
+
+
+# ---------------- 阶段 2：井号/时序/事件日历只读接口 ----------------
+
+from sim.timebase import DATE, at  # noqa: E402
+
+
+def test_list_wells_paginated():
+    """井号台账分页：total/total_pages/items 结构正确。"""
+    with TestClient(create_app()) as client:
+        r = client.get("/api/v1/wells", params={"page_size": 3, "page": 2})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["total"] == 7
+        assert body["page"] == 2
+        assert body["page_size"] == 3
+        assert body["total_pages"] == 3
+        assert len(body["items"]) == 3
+        item = body["items"][0]
+        assert {"well_id", "name", "well_type", "well_type_cn",
+                "device_id", "device_type", "location", "status"} <= item.keys()
+
+
+def test_list_wells_filter_by_type():
+    """按井型过滤；非法井型返回统一 400。"""
+    with TestClient(create_app()) as client:
+        r = client.get("/api/v1/wells", params={"well_type": "gas"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["total"] == 3
+        assert {w["well_id"] for w in body["items"]} == {"W-2", "W-6", "W-7"}
+        assert all(w["well_type_cn"] == "采气" for w in body["items"])
+
+        r2 = client.get("/api/v1/wells", params={"well_type": "nuclear"})
+        assert r2.status_code == 400
+        assert r2.json()["error"]["code"] == "BAD_REQUEST"
+
+
+def test_get_well_detail_and_not_found():
+    """单井详情支持别名归一化；不存在返回统一 404。"""
+    with TestClient(create_app()) as client:
+        r = client.get("/api/v1/wells/W-3")
+        assert r.status_code == 200
+        assert r.json()["name"] == "3号采油井"
+
+        r_alias = client.get("/api/v1/wells/w3")
+        assert r_alias.status_code == 200
+        assert r_alias.json()["well_id"] == "W-3"
+
+        r404 = client.get("/api/v1/wells/W-99")
+        assert r404.status_code == 404
+        error = r404.json()["error"]
+        assert error["code"] == "NOT_FOUND"
+        assert error["request_id"]
+
+
+def test_telemetry_passthrough_with_gap_and_events():
+    """时序透传：W-3 今日产量含 02:00~04:00 缺口与下行趋势事件。"""
+    with TestClient(create_app()) as client:
+        r = client.get("/api/v1/telemetry", params={
+            "tag": "W3.daily_oil_prod",
+            "start": f"{DATE} 00:00",
+            "end": f"{DATE} 23:59",
+        })
+        assert r.status_code == 200
+        body = r.json()
+        assert body["tag"] == "W3.daily_oil_prod"
+        assert body["metric"] == "井口日产量"
+        assert body["unit"] == "t/d"
+        assert len(body["series"]) == 21  # 24 小时 - 3 小时缺口（02/03/04 点）
+        assert body["quality"]["gap"] == [f"{DATE} 02:00~{DATE} 04:00"]
+        assert body["events"]
+        assert body["events"][0]["type"] == "异常"
+
+
+def test_telemetry_rejects_invalid_tag_and_range():
+    """非法 tag / 未登记指标 / 时间范围错误均返回统一 400。"""
+    with TestClient(create_app()) as client:
+        r = client.get("/api/v1/telemetry", params={"tag": "foo.bar"})
+        assert r.status_code == 400
+        error = r.json()["error"]
+        assert error["code"] == "BAD_REQUEST"
+        assert error["request_id"]
+
+        r2 = client.get("/api/v1/telemetry", params={"tag": "W3.unknown_metric"})
+        assert r2.status_code == 400
+
+        r3 = client.get("/api/v1/telemetry", params={
+            "tag": "W3.daily_oil_prod",
+            "start": f"{DATE} 12:00",
+            "end": f"{DATE} 08:00",
+        })
+        assert r3.status_code == 400
+
+        r4 = client.get("/api/v1/telemetry", params={
+            "tag": "W3.daily_oil_prod",
+            "start": "not-a-date",
+        })
+        assert r4.status_code == 400
+
+
+def test_events_calendar_range_and_well_filter():
+    """事件日历：今日窗口命中检修/停电/限产，支持井号过滤与分页结构。"""
+    with TestClient(create_app()) as client:
+        r = client.get("/api/v1/events/calendar")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["total"] == 3  # W-1 检修、W-5 停电、W-7 限产（W-2 检修在昨天）
+        types = {e["event_type"] for e in body["items"]}
+        assert types == {"检修", "停电", "限产"}
+        assert {"event_type", "wells", "start", "end", "desc"} <= body["items"][0].keys()
+
+        r2 = client.get("/api/v1/events/calendar", params={"well_id": "W-1"})
+        assert r2.status_code == 200
+        assert r2.json()["total"] == 1
+        assert r2.json()["items"][0]["wells"] == ["W-1"]
+
+        yesterday = at(-1, "09:00")
+        r3 = client.get("/api/v1/events/calendar",
+                        params={"from": yesterday, "to": at(-1, "23:59")})
+        assert r3.json()["total"] == 2  # 昨日 W-2 检修 + 跨期 W-7 限产
+
+        r4 = client.get("/api/v1/events/calendar", params={"well_id": "W-99"})
+        assert r4.status_code == 400
+        assert r4.json()["error"]["code"] == "BAD_REQUEST"

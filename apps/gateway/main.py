@@ -68,8 +68,10 @@ def create_app() -> FastAPI:
 
     # 注册路由
     from apps.gateway.api.routes import router
+    from apps.gateway.api.wellsite import router as wellsite_router
 
     app.include_router(router)
+    app.include_router(wellsite_router)
 
     return app
 
