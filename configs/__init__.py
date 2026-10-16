@@ -83,6 +83,8 @@ class Settings(BaseSettings):
     # ---- FastAPI 网关 ----
     gateway_host: str = "0.0.0.0"
     gateway_port: int = 8000
+    # 逗号分隔的允许来源，"*" 表示不携带凭证的全放行
+    cors_origins: str = "*"
 
     # ---- 事件总线 ----
     eventbus_backend: Literal["memory", "mysql", "redis_stream"] = "mysql"
@@ -109,6 +111,11 @@ class Settings(BaseSettings):
     def redis_url(self) -> str:
         auth = f":{self.redis_password}@" if self.redis_password else ""
         return f"redis://{auth}{self.redis_host}:{self.redis_port}/{self.redis_db}"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        """解析 CORS_ORIGINS（逗号分隔），去空白、去空项。"""
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 @lru_cache(maxsize=1)

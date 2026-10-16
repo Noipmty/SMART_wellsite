@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import time
 import uuid
 from typing import Any
 
@@ -12,6 +14,7 @@ from agents.base import BaseAgent
 from agents.duty_assistant import DutyAssistantAgent
 from agents.orchestrator_agent import OrchestratorAgent, SubtaskSpec
 from libs.schemas import AgentName, AgentResult, AgentTask, FinalAnswer, IntentType, StructuredIntent
+from services.trace_recorder import TraceRecorder
 from sim.points import resolve_metric, spec_by_suffix, tag_for
 from sim.registry import WELLS
 
@@ -26,46 +29,69 @@ class Orchestrator:
     """多智能体编排器。"""
 
     def __init__(self, agents: dict[AgentName, BaseAgent], duty: DutyAssistantAgent,
+                 trace_recorder: TraceRecorder | None = None,
                  max_calls: int = MAX_CALLS) -> None:
         self._agents = agents
         self._duty = duty
         self._scheduler = OrchestratorAgent()
+        self._recorder = trace_recorder
         self._max_calls = max_calls
 
     async def run(self, question: str, session_id: str | None = None,
                   eventbus: Any = None) -> FinalAnswer:
-        """完整链路：理解 → 路由 → 并行执行 → 聚合 → 最终回答。"""
+        """完整链路：理解 → 路由 → 并行执行 → 聚合 → 最终回答（全量 trace 落库）。"""
+        started = time.monotonic()
         trace_id = f"tr-{uuid.uuid4().hex[:8]}"
         intent = self._duty.understand(question, session_id)
         intent.trace_id = trace_id
 
-        if intent.need_clarify:
-            return self._duty.compose(question, intent, [], [], trace_id, session_id)
+        results: list[AgentResult] = []
+        conflicts: list[str] = []
+        try:
+            if intent.need_clarify:
+                final = self._duty.compose(question, intent, [], [], trace_id, session_id)
+                return final
 
-        specs = self._scheduler.route(intent)
-        results, conflicts = await self._execute(specs, intent, trace_id)
+            specs = self._scheduler.route(intent)
+            results, conflicts = await self._execute(specs, intent, trace_id)
 
-        # 诊断结论需复核 / 感知事件 → 追加告警处置
-        alerts = self._derive_alerts(results)
-        if alerts:
-            if len(results) + 1 > self._max_calls:
-                conflicts.append(f"调用预算 {self._max_calls} 次已上限，告警处置未执行")
-            else:
-                handler = self._agents.get(AgentName.ALERT_HANDLER)
-                if handler is not None:
-                    r = await self._run_one(
-                        SubtaskSpec(AgentName.ALERT_HANDLER, 8000, "告警处置"),
-                        intent, trace_id, {"alerts": alerts},
-                    )
-                    if r is not None:
-                        results.append(r)
+            # 诊断结论需复核 / 感知事件 → 追加告警处置
+            alerts = self._derive_alerts(results)
+            if alerts:
+                if len(results) + 1 > self._max_calls:
+                    conflicts.append(f"调用预算 {self._max_calls} 次已上限，告警处置未执行")
+                else:
+                    handler = self._agents.get(AgentName.ALERT_HANDLER)
+                    if handler is not None:
+                        r = await self._run_one(
+                            SubtaskSpec(AgentName.ALERT_HANDLER, 8000, "告警处置"),
+                            intent, trace_id, {"alerts": alerts},
+                        )
+                        if r is not None:
+                            results.append(r)
 
-        if eventbus is not None:
-            await self._publish(eventbus, results, trace_id)
+            if eventbus is not None:
+                await self._publish(eventbus, results, trace_id)
 
-        return self._duty.compose(question, intent, results, conflicts, trace_id, session_id)
+            final = self._duty.compose(question, intent, results, conflicts, trace_id, session_id)
+            return final
+        finally:
+            await self._record(question, intent, results, conflicts, started)
 
     # ---------------- 执行 ----------------
+
+    async def _record(self, question: str, intent: StructuredIntent,
+                      results: list[AgentResult], conflicts: list[str],
+                      started: float) -> None:
+        """全量落库；记录失败不得影响主链路。"""
+        if self._recorder is None:
+            return
+        duration_ms = int((time.monotonic() - started) * 1000)
+        final = self._duty.compose(
+            question, intent, results, conflicts, intent.trace_id, intent.session_id
+        )
+        with contextlib.suppress(Exception):
+            await self._recorder.record(question, intent, final, duration_ms)
 
     async def _execute(self, specs: list[SubtaskSpec], intent: StructuredIntent,
                        trace_id: str) -> tuple[list[AgentResult], list[str]]:

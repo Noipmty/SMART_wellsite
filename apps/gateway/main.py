@@ -1,64 +1,48 @@
 """FastAPI 网关主应用：/healthz、/api/v1/chat、WebSocket 实时推送。
 
 值班助手入口，请求交给编排器（apps.orchestrator）完成多智能体协作。
+依赖通过 lifespan 装配到 ``app.state.container``，路由层按需取用。
 """
 
 from __future__ import annotations
 
-import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from typing import Any
 
 import structlog
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from apps.orchestrator import build_orchestrator
+from apps.container import Container
 from configs import get_settings
-from libs.eventbus import create_eventbus
-from libs.llm import MockLLMClient, LLMMessage
+from libs.api import RequestIDMiddleware, register_exception_handlers
 from libs.tracing import setup_observability
 
 logger = structlog.get_logger(__name__)
 
-# 全局单例
-_eventbus = None
-_llm_client: MockLLMClient | None = None
-_orchestrator: Any = None
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期：启动 / 关闭。"""
-    global _eventbus, _llm_client, _orchestrator
-
+    """应用生命周期：装配依赖容器 / 释放资源。"""
     setup_observability()
     logger.info("gateway.starting")
 
-    # 初始化事件总线
-    _eventbus = create_eventbus()
-    await _eventbus.start()
-
-    # 初始化 LLM 客户端（mock）
-    _llm_client = MockLLMClient()
-
-    # 装配多智能体编排器
-    _orchestrator = build_orchestrator(_llm_client)
+    container = await Container.create()
+    app.state.container = container
 
     logger.info("gateway.ready", port=get_settings().gateway_port)
-
-    yield
-
-    # 关闭
-    if _eventbus:
-        await _eventbus.stop()
-    logger.info("gateway.stopped")
+    try:
+        yield
+    finally:
+        await container.shutdown()
+        app.state.container = None
+        logger.info("gateway.stopped")
 
 
 def create_app() -> FastAPI:
     """创建 FastAPI 应用。"""
+    settings = get_settings()
+    origins = settings.cors_origin_list
+
     app = FastAPI(
         title="智慧井场多智能体系统",
         description="五层架构·10 Agent·3 阶段落地·LangGraph + FastAPI",
@@ -66,14 +50,21 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS
+    # CORS：显式来源才允许携带凭证；"*" 时不允许凭证（浏览器安全约束）
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=origins,
+        allow_credentials=origins != ["*"],
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
     )
+
+    # 请求 ID 注入 + structlog 上下文 + 访问日志
+    app.add_middleware(RequestIDMiddleware)
+
+    # 统一错误响应体
+    register_exception_handlers(app)
 
     # 注册路由
     from apps.gateway.api.routes import router
