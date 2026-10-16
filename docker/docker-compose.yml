@@ -1,0 +1,198 @@
+# 智慧井场多智能体系统 - 基础设施编排
+# 使用本地已有镜像，优先不拉取新镜像
+# 启动: docker compose -f docker/docker-compose.yml up -d
+# 停止: docker compose -f docker/docker-compose.yml down
+
+services:
+  # ==================== PostgreSQL（业务数据） ====================
+  postgres:
+    image: postgres:15-alpine
+    container_name: wellsite-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: wellsite
+      POSTGRES_USER: wellsite
+      POSTGRES_PASSWORD: wellsite_dev_2026
+      TZ: Asia/Shanghai
+    volumes:
+      - wellsite_pg_data:/var/lib/postgresql/data
+      - ./init/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wellsite"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==================== TDengine（时序数据） ====================
+  tdengine:
+    image: tdengine/tdengine:3.3.3.0
+    container_name: wellsite-tdengine
+    restart: unless-stopped
+    ports:
+      - "6030:6030"
+      - "6041:6041"
+      - "6043-6049:6043-6049"
+      - "6043-6049:6043-6049/udp"
+    environment:
+      TAOS_FQDN: localhost
+      TZ: Asia/Shanghai
+    volumes:
+      - wellsite_td_data:/var/lib/taos
+      - wellsite_td_log:/var/log/taos
+    healthcheck:
+      test: ["CMD", "taos", "-s", "SHOW DATABASES"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ==================== Redis（缓存/会话/Stream 事件总线） ====================
+  redis:
+    image: redis:7.2
+    container_name: wellsite-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - wellsite_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==================== MySQL（模拟事件总线，本地开发用） ====================
+  mysql:
+    image: mysql:8.0.39
+    container_name: wellsite-mysql
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root_dev_2026
+      MYSQL_DATABASE: wellsite_bus
+      MYSQL_USER: wellsite
+      MYSQL_PASSWORD: wellsite_dev_2026
+      TZ: Asia/Shanghai
+    volumes:
+      - wellsite_mysql_data:/var/lib/mysql
+      - ./init/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "wellsite", "-pwellsite_dev_2026"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==================== MinIO（对象存储，可选） ====================
+  minio:
+    image: minio/minio:latest
+    container_name: wellsite-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - wellsite_minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # ==================== Grafana（看板） ====================
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: wellsite-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: ""
+    volumes:
+      - wellsite_grafana_data:/var/lib/grafana
+    depends_on:
+      - postgres
+      - redis
+    profiles: ["observability"]
+
+  # ==================== Prometheus（指标） ====================
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: wellsite-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - wellsite_prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+    profiles: ["observability"]
+
+  # ==================== 阶段二启用（注释保留） ====================
+  # Neo4j（知识图谱）
+  # neo4j:
+  #   image: neo4j:5.26
+  #   container_name: wellsite-neo4j
+  #   restart: unless-stopped
+  #   ports:
+  #     - "7474:7474"
+  #     - "7687:7687"
+  #   environment:
+  #     NEO4J_AUTH: neo4j/neo4j_dev_2026
+  #     NEO4J_PLUGINS: '["apoc"]'
+  #   volumes:
+  #     - wellsite_neo4j_data:/data
+  #     - wellsite_neo4j_logs:/logs
+
+  # Milvus（向量库）
+  # milvus:
+  #   image: milvusdb/milvus:v2.4.10
+  #   container_name: wellsite-milvus
+  #   restart: unless-stopped
+  #   ports:
+  #     - "19530:19530"
+  #     - "9091:9091"
+  #   environment:
+  #     ETCD_ENDPOINTS: etcd:2379
+  #     MINIO_ADDRESS: minio:9000
+  #   depends_on:
+  #     - milvus-etcd
+  #     - minio
+  #   volumes:
+  #     - wellsite_milvus_data:/var/lib/milvus
+
+  # milvus-etcd:
+  #   image: quay.io/coreos/etcd:v3.5.14
+  #   container_name: wellsite-milvus-etcd
+  #   restart: unless-stopped
+  #   environment:
+  #     ETCD_AUTO_COMPACTION_MODE: revision
+  #     ETCD_AUTO_COMPACTION_RETENTION: "1000"
+  #     ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+  #   volumes:
+  #     - wellsite_etcd_data:/etcd
+
+# ==================== 数据卷 ====================
+volumes:
+  wellsite_pg_data:
+  wellsite_td_data:
+  wellsite_td_log:
+  wellsite_redis_data:
+  wellsite_mysql_data:
+  wellsite_minio_data:
+  wellsite_grafana_data:
+  wellsite_prometheus_data:
+  # wellsite_neo4j_data:
+  # wellsite_neo4j_logs:
+  # wellsite_milvus_data:
+  # wellsite_etcd_data:
