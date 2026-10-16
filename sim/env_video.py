@@ -1,6 +1,6 @@
-"""环境监测 + 视频智能 仿真（mock）。
+"""环境监测 + 视频智能 仿真（mock，相对今天生成）。
 
-环境场景：2026-10-14 W-7 井口 H2S 自 12:00 起快速爬升，15:30 达 12ppm（超过预警值 10）。
+环境场景：今日 W-7 井口 H2S 自 12:00 起快速爬升，15:30 达 12ppm（超过预警值 10）。
 视频场景：CAM-03 检测到未戴安全帽（高风险事件需多帧二次确认）。
 """
 
@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 
 from libs.schemas import PerceptionEvent, TelemetryPoint
 from sim.scada import parse_dt
+from sim.timebase import DATE, at
 
 _FMT = "%Y-%m-%d %H:%M"
 
@@ -25,9 +26,9 @@ ENV_BASE: dict[str, float] = {"H2S": 2.0, "可燃气体": 4.0, "CO": 3.0}
 # 环境场景：(well, metric) → 爬升参数
 ENV_SCENARIOS: dict[tuple[str, str], dict] = {
     ("W-7", "H2S"): {
-        "date": "2026-10-14",
-        "ramp_start": "2026-10-14 12:00",
-        "ramp_end": "2026-10-14 15:30",
+        "date": DATE,
+        "ramp_start": at(0, "12:00"),
+        "ramp_end": at(0, "15:30"),
         "from_val": 3.0,
         "to_val": 12.0,
     }
@@ -88,7 +89,7 @@ VIDEO_EVENTS: list[dict] = [
     {
         "cam_id": "CAM-03",
         "well": "W-7",
-        "ts": "2026-10-14 15:22:01",
+        "ts": at(0, "15:22"),
         "class": "未戴安全帽",
         "bbox": [102, 88, 160, 210],
         "conf": 0.92,
@@ -98,7 +99,7 @@ VIDEO_EVENTS: list[dict] = [
     {
         "cam_id": "CAM-05",
         "well": "W-1",
-        "ts": "2026-10-14 10:05:12",
+        "ts": at(0, "10:05"),
         "class": "违规闯入",
         "bbox": [300, 120, 360, 300],
         "conf": 0.88,

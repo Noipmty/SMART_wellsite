@@ -1,5 +1,13 @@
 """协作消息 Schema 包。"""
 
+from libs.schemas.agent_io import (
+    DiagnosisOutput,
+    ProductionOutput,
+    ReportKnowledgeOutput,
+    RiskOutput,
+    RoutingItem,
+    RoutingOutput,
+)
 from libs.schemas.enums import (
     DETERMINISTIC_AGENTS,
     LLM_AGENTS,
@@ -42,4 +50,10 @@ __all__ = [
     "TelemetryPoint",
     "TelemetryResult",
     "AlertDecision",
+    "DiagnosisOutput",
+    "ProductionOutput",
+    "RiskOutput",
+    "ReportKnowledgeOutput",
+    "RoutingItem",
+    "RoutingOutput",
 ]

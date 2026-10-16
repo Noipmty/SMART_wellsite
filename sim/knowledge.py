@@ -55,22 +55,21 @@ KB_ENTRIES: list[dict] = [
 
 
 def search_knowledge(query: str, top_k: int = 3) -> list[dict]:
-    """按关键词重合度检索知识条目（mock RAG）。"""
+    """按关键词重合度检索知识条目（mock RAG）。
+
+    仅当命中 tags 或 title 时才纳入候选，避免靠单字重合误召回无关条目。
+    """
     if not query:
         return []
     q = str(query)
     scored: list[tuple[int, dict]] = []
     for entry in KB_ENTRIES:
-        score = 0
-        for tag in entry["tags"]:
-            if tag in q:
-                score += 2
-        if entry["title"] in q:
-            score += 3
-        for ch in set(q):
-            if len(ch.strip()) and ch in entry["text"]:
-                score += 1
-        if score > 0:
-            scored.append((score, entry))
+        tag_score = sum(2 for tag in entry["tags"] if tag in q)
+        title_score = 3 if entry["title"] in q else 0
+        base = tag_score + title_score
+        if base == 0:
+            continue
+        char_score = sum(1 for ch in set(q) if ch.strip() and ch in entry["text"])
+        scored.append((base * 10 + min(char_score, 20), entry))
     scored.sort(key=lambda x: x[0], reverse=True)
     return [e for _, e in scored[:top_k]]

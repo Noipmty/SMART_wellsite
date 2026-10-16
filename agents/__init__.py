@@ -1,15 +1,32 @@
-"""agents 包：每个 Agent 一个子包（graph / tools / schema / prompt）。
+"""Agent 包：10 个节点实现 + 工厂。"""
 
-阶段一 Agent（P1b-P1e）:
-  - data_collector: 数据采集 Agent
-  - device_diagnosis: 设备诊断 Agent
-  - alert_handler: 告警处置 Agent
-  - orchestrator: 井场调度编排器
-  - duty_assistant: 值班助手
+from agents.alert_handler import AlertHandlerAgent
+from agents.base import BaseAgent
+from agents.data_collector import DataCollectorAgent
+from agents.device_diagnosis import DeviceDiagnosisAgent
+from agents.duty_assistant import DutyAssistantAgent, detect_intents
+from agents.environment_safety import EnvironmentSafetyAgent
+from agents.factory import build_agents
+from agents.orchestrator_agent import OrchestratorAgent, SubtaskSpec
+from agents.production_analysis import ProductionAnalysisAgent
+from agents.report_knowledge import ReportKnowledgeAgent
+from agents.safety_risk import SafetyRiskAgent
+from agents.video_intelligence import VideoIntelligenceAgent
 
-阶段二 Agent（P2a-P2e）:
-  - video_intelligence / environment_safety / report_knowledge 等
 
-阶段三 Agent（P3a-P3d）:
-  - production_optimizer / safety_risk / self_evolution 等
-"""
+__all__ = [
+    "BaseAgent",
+    "DataCollectorAgent",
+    "VideoIntelligenceAgent",
+    "EnvironmentSafetyAgent",
+    "DeviceDiagnosisAgent",
+    "ProductionAnalysisAgent",
+    "SafetyRiskAgent",
+    "ReportKnowledgeAgent",
+    "AlertHandlerAgent",
+    "DutyAssistantAgent",
+    "OrchestratorAgent",
+    "SubtaskSpec",
+    "detect_intents",
+    "build_agents",
+]

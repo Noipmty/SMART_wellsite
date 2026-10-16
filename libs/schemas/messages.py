@@ -105,6 +105,7 @@ class AgentResult(BaseModel):
     error: str | None = None
     elapsed_ms: int | None = None
     citations: list[str] = Field(default_factory=list)
+    data: dict[str, Any] = Field(default_factory=dict, description="Agent 专属载荷（时序/检测/告警决策等）")
 
 
 class FinalAnswer(BaseModel):

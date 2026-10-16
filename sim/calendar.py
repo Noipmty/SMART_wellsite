@@ -1,4 +1,4 @@
-"""事件日历（Event Calendar）—— mock 数据源。
+"""事件日历（Event Calendar）—— mock 数据源（相对今天生成）。
 
 检修 / 停电 / 限产记录参与归因：已知事件直接引用，禁止误判为设备故障。
 """
@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+
+from sim.timebase import at
 
 _TS_FMT = "%Y-%m-%d %H:%M"
 
@@ -33,13 +35,13 @@ class CalendarEvent:
 
 
 CALENDAR: list[CalendarEvent] = [
-    CalendarEvent("检修", ("W-1",), "2026-10-14 08:00", "2026-10-14 12:00",
+    CalendarEvent("检修", ("W-1",), at(0, "08:00"), at(0, "12:00"),
                   "W-1 抽油机例行检修，计划停井 4 小时"),
-    CalendarEvent("停电", ("W-5",), "2026-10-14 02:00", "2026-10-14 04:00",
+    CalendarEvent("停电", ("W-5",), at(0, "02:00"), at(0, "04:00"),
                   "东区计划停电，W-5 停井 2 小时"),
-    CalendarEvent("限产", ("W-7",), "2026-10-12 00:00", "2026-10-16 23:59",
+    CalendarEvent("限产", ("W-7",), at(-4, "00:00"), at(0, "23:59"),
                   "外输管线检修，W-7 限产 30%"),
-    CalendarEvent("检修", ("W-2",), "2026-10-13 09:00", "2026-10-13 17:00",
+    CalendarEvent("检修", ("W-2",), at(-1, "09:00"), at(-1, "17:00"),
                   "W-2 采气树阀门维护"),
 ]
 

@@ -1,7 +1,7 @@
 """SCADA 时序数据仿真（mock）—— 等价于 TDengine 查询结果。
 
-内置故障场景：2026-10-14 全天 W-3 采油井供液不足
-（井口日产量 / 泵效 / 沉没度 / 电流 持续下行，且 02:00~04:00 存在数据缺口）。
+内置故障场景：今日 W-3 采油井供液不足
+（井口日产量 / 泵效 / 沉没度 / 电流 自 08:00 起持续下行，且 02:00~04:00 存在数据缺口）。
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 
 from libs.schemas import PerceptionEvent, TelemetryPoint, TelemetryResult
 from sim.points import spec_by_suffix, split_tag
+from sim.timebase import DATE, at
 
 _FMT = "%Y-%m-%d %H:%M"
 
@@ -38,8 +39,8 @@ BASES: dict[str, dict[str, tuple[float, float]]] = {
     },
 }
 
-SCENARIO_DATE = "2026-10-14"
-SCENARIO_START = "2026-10-14 08:00"  # 故障起始时刻（此前保持基线）
+SCENARIO_DATE = DATE
+SCENARIO_START = at(0, "08:00")  # 故障起始时刻（此前保持基线）
 
 # 每小时变化量（仅 SCENARIO_DATE 且 SCENARIO_START 之后生效）
 SCENARIO_SLOPE: dict[tuple[str, str], float] = {
@@ -52,10 +53,10 @@ SCENARIO_SLOPE: dict[tuple[str, str], float] = {
 
 # 数据断档（模拟采集中断）
 GAPS: dict[tuple[str, str], list[tuple[str, str]]] = {
-    ("W-3", "daily_oil_prod"): [("2026-10-14 02:00", "2026-10-14 04:00")],
-    ("W-3", "pump_efficiency"): [("2026-10-14 02:00", "2026-10-14 04:00")],
-    ("W-3", "submergence"): [("2026-10-14 02:00", "2026-10-14 04:00")],
-    ("W-3", "current"): [("2026-10-14 02:00", "2026-10-14 04:00")],
+    ("W-3", "daily_oil_prod"): [(at(0, "02:00"), at(0, "04:00"))],
+    ("W-3", "pump_efficiency"): [(at(0, "02:00"), at(0, "04:00"))],
+    ("W-3", "submergence"): [(at(0, "02:00"), at(0, "04:00"))],
+    ("W-3", "current"): [(at(0, "02:00"), at(0, "04:00"))],
 }
 
 

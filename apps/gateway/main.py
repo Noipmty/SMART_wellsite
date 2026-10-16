@@ -1,6 +1,6 @@
 """FastAPI 网关主应用：/healthz、/api/v1/chat、WebSocket 实时推送。
 
-值班助手入口，当前返回占位响应，后续阶段对接编排器。
+值班助手入口，请求交给编排器（apps.orchestrator）完成多智能体协作。
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
+from apps.orchestrator import build_orchestrator
 from configs import get_settings
 from libs.eventbus import create_eventbus
 from libs.llm import MockLLMClient, LLMMessage
@@ -25,12 +26,13 @@ logger = structlog.get_logger(__name__)
 # 全局单例
 _eventbus = None
 _llm_client: MockLLMClient | None = None
+_orchestrator: Any = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期：启动 / 关闭。"""
-    global _eventbus, _llm_client
+    global _eventbus, _llm_client, _orchestrator
 
     setup_observability()
     logger.info("gateway.starting")
@@ -39,8 +41,11 @@ async def lifespan(app: FastAPI):
     _eventbus = create_eventbus()
     await _eventbus.start()
 
-    # 初始化 LLM 客户端
+    # 初始化 LLM 客户端（mock）
     _llm_client = MockLLMClient()
+
+    # 装配多智能体编排器
+    _orchestrator = build_orchestrator(_llm_client)
 
     logger.info("gateway.ready", port=get_settings().gateway_port)
 

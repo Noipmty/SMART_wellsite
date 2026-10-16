@@ -57,6 +57,63 @@ _MOCK_JSON_TEMPLATES: dict[str, dict[str, Any]] = {
 }
 
 
+def _agent_json(model_name: str, user_text: str) -> dict[str, Any] | None:
+    """按 Agent 输出模型名生成贴近输入的结构化 mock（模拟 LLM 推理）。
+
+    让 mock 结果随输入证据变化，避免"任何问题都返回同一结论"。
+    """
+    if model_name == "DiagnosisOutput":
+        if any(k in user_text for k in ("检修", "停电", "限产")):
+            return {
+                "diagnosis": "人工事件（检修/停电/限产）导致的停产，非设备故障",
+                "confidence": 0.9, "evidence": [],
+                "suggestion": "核对事件日历，无需设备处置",
+                "needs_review": False, "known_event": "命中事件日历",
+            }
+        if "沉没度" in user_text and ("下行" in user_text or "下降" in user_text):
+            return {
+                "diagnosis": "供液不足", "confidence": 0.87, "evidence": [],
+                "suggestion": "建议调低冲次观察 4 小时（需人工确认后执行）",
+                "needs_review": True, "known_event": None,
+            }
+        return {
+            "diagnosis": "无法确定", "confidence": 0.55, "evidence": [],
+            "suggestion": "需补充更长时间窗口 / 振动频谱 / 现场照片",
+            "needs_review": True, "known_event": None,
+        }
+    if model_name == "ProductionOutput":
+        if "下行" in user_text or "下降" in user_text:
+            return {
+                "conclusion": "产量下降，多参数交叉验证指向供液不足",
+                "confidence": 0.82, "evidence": [],
+                "parameter_advice": [{
+                    "param": "冲次", "from": 6, "to": 4,
+                    "reason": "匹配地层供液能力，避免泵抽空",
+                    "confirm_required": True, "observe_hours": 4.0,
+                }],
+            }
+        return {"conclusion": "各项参数处于正常波动范围", "confidence": 0.7,
+                "evidence": [], "parameter_advice": []}
+    if model_name == "RiskOutput":
+        if "H2S" in user_text:
+            return {"risk_level": "预警", "description": "井口 H2S 浓度超过预警值",
+                    "affected_area": "井口周边 50 米",
+                    "action_suggestion": "安排人员佩戴检测仪上风向确认，暂停周边动火作业",
+                    "must_human_confirm": True}
+        return {"risk_level": "提醒", "description": "轻微隐患，可安排巡检确认",
+                "affected_area": "现场", "action_suggestion": "安排巡检确认",
+                "must_human_confirm": True}
+    if model_name == "ReportKnowledgeOutput":
+        return {"answer": "已依据检索到的知识库条目作答，详见来源引用。",
+                "source_refs": [], "report": None}
+    if model_name == "StructuredIntent":
+        return {"intent": "production_analysis", "entities": {},
+                "confidence": 0.8, "need_clarify": False, "clarify_options": []}
+    if model_name == "RoutingOutput":
+        return {"subtasks": [], "needs_review": False}
+    return None
+
+
 class MockLLMClient(LLMClient):
     """Mock LLM 客户端：返回预设响应。"""
 
@@ -126,8 +183,15 @@ class MockLLMClient(LLMClient):
         """返回符合 response_model 的预设 JSON。"""
         await asyncio.sleep(self._delay)
 
+        user_msg = ""
+        for m in messages:
+            if m.role == "user":
+                user_msg = m.content
+
         model_name = response_model.__name__
         template = _MOCK_JSON_TEMPLATES.get(model_name)
+        if template is None:
+            template = _agent_json(model_name, user_msg)
 
         if template is None:
             # 如果没有预设模板，尝试从 model_fields 生成默认值
