@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from libs.llm.base import LLMClient
 from libs.schemas import AgentName
+from services.alert_service import AlertService
 
 from agents.alert_handler import AlertHandlerAgent
 from agents.base import BaseAgent
@@ -16,8 +17,17 @@ from agents.safety_risk import SafetyRiskAgent
 from agents.video_intelligence import VideoIntelligenceAgent
 
 
-def build_agents(llm: LLMClient) -> dict[AgentName, BaseAgent]:
-    """构建 8 个可编排节点（值班助手与调度器由编排层单独持有）。"""
+def build_agents(llm: LLMClient,
+                 alert_service: AlertService | None = None) -> dict[AgentName, BaseAgent]:
+    """构建 8 个可编排节点（值班助手与调度器由编排层单独持有）。
+
+    alert_service 缺省时构建独立实例（测试场景）；
+    生产由容器注入，保证告警处置与 API 查询同源。
+    """
+    if alert_service is None:  # pragma: no cover - 仅兜底，正常路径由容器注入
+        from repositories.alert_repo import AlertRepository, WorkOrderRepository
+
+        alert_service = AlertService(AlertRepository(), WorkOrderRepository())
     return {
         AgentName.DATA_COLLECTOR: DataCollectorAgent(),
         AgentName.VIDEO_INTELLIGENCE: VideoIntelligenceAgent(),
@@ -26,5 +36,5 @@ def build_agents(llm: LLMClient) -> dict[AgentName, BaseAgent]:
         AgentName.PRODUCTION_ANALYSIS: ProductionAnalysisAgent(llm),
         AgentName.SAFETY_RISK: SafetyRiskAgent(llm),
         AgentName.REPORT_KNOWLEDGE: ReportKnowledgeAgent(llm),
-        AgentName.ALERT_HANDLER: AlertHandlerAgent(),
+        AgentName.ALERT_HANDLER: AlertHandlerAgent(alert_service),
     }

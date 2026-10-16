@@ -8,6 +8,13 @@ from libs.schemas.agent_io import (
     RoutingItem,
     RoutingOutput,
 )
+from libs.schemas.alerts import (
+    Alert,
+    AlertStatus,
+    EscalationRecord,
+    WorkOrder,
+    WorkOrderStatus,
+)
 from libs.schemas.enums import (
     DETERMINISTIC_AGENTS,
     LLM_AGENTS,
@@ -50,6 +57,11 @@ __all__ = [
     "TelemetryPoint",
     "TelemetryResult",
     "AlertDecision",
+    "Alert",
+    "AlertStatus",
+    "WorkOrder",
+    "WorkOrderStatus",
+    "EscalationRecord",
     "DiagnosisOutput",
     "ProductionOutput",
     "RiskOutput",
