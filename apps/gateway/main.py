@@ -68,6 +68,7 @@ def create_app() -> FastAPI:
 
     # 注册路由
     from apps.gateway.api.alerts import router as alerts_router
+    from apps.gateway.api.graph import router as graph_router
     from apps.gateway.api.kb import router as kb_router
     from apps.gateway.api.routes import router
     from apps.gateway.api.traces import router as traces_router
@@ -78,6 +79,7 @@ def create_app() -> FastAPI:
     app.include_router(alerts_router)
     app.include_router(traces_router)
     app.include_router(kb_router)
+    app.include_router(graph_router)
 
     return app
 

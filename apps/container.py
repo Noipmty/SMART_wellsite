@@ -16,9 +16,11 @@ from libs.eventbus import EventBus, create_eventbus
 from libs.llm import MockLLMClient
 from libs.llm.base import LLMClient
 from repositories.alert_repo import AlertRepository, WorkOrderRepository
+from repositories.graph_repo import GraphRepository
 from repositories.kb_repo import KBChunkRepository, KBDocumentRepository
 from repositories.trace_repo import TraceRepository
 from services.alert_service import AlertService
+from services.graph_service import GraphService
 from services.kb_service import KBService
 from services.trace_recorder import TraceRecorder
 
@@ -39,6 +41,8 @@ class Container:
     kb_doc_repo: KBDocumentRepository
     kb_chunk_repo: KBChunkRepository
     kb_service: KBService
+    graph_repo: GraphRepository
+    graph_service: GraphService
     orchestrator: Orchestrator
 
     @classmethod
@@ -62,6 +66,10 @@ class Container:
         kb_service = KBService(kb_doc_repo, kb_chunk_repo)
         await kb_service.seed_defaults()
 
+        graph_repo = GraphRepository()
+        graph_service = GraphService(graph_repo, kb_doc_repo, kb_chunk_repo)
+        await graph_service.rebuild(background=False)  # 启动即基于种子 KB 建图
+
         orchestrator = build_orchestrator(
             llm_client, trace_recorder=trace_recorder,
             alert_service=alert_service, kb_service=kb_service,
@@ -79,6 +87,8 @@ class Container:
             kb_doc_repo=kb_doc_repo,
             kb_chunk_repo=kb_chunk_repo,
             kb_service=kb_service,
+            graph_repo=graph_repo,
+            graph_service=graph_service,
             orchestrator=orchestrator,
         )
 
