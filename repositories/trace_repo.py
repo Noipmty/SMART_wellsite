@@ -19,11 +19,14 @@ class TraceRepository(InMemoryRepository[TraceRecord]):
         session_id: str | None = None,
         start: datetime | None = None,
         end: datetime | None = None,
+        intent: str | None = None,
     ) -> list[TraceRecord]:
-        """按会话 / 时间窗口过滤，按创建时间倒序返回。"""
+        """按会话 / 意图 / 时间窗口过滤，按创建时间倒序返回。"""
 
         def predicate(r: TraceRecord) -> bool:
             if session_id and r.session_id != session_id:
+                return False
+            if intent and r.intent != intent:
                 return False
             if start and r.created_at < start:
                 return False
