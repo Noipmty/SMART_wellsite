@@ -1,0 +1,45 @@
+"""协作消息 Schema 包。"""
+
+from libs.schemas.enums import (
+    DETERMINISTIC_AGENTS,
+    LLM_AGENTS,
+    AgentName,
+    ConfidenceLevel,
+    IntentType,
+    Level,
+    to_confidence_level,
+)
+from libs.schemas.messages import (
+    AgentResult,
+    AgentTask,
+    AlertDecision,
+    Entities,
+    Evidence,
+    FinalAnswer,
+    ParameterAdvice,
+    PerceptionEvent,
+    StructuredIntent,
+    TelemetryPoint,
+    TelemetryResult,
+)
+
+__all__ = [
+    "AgentName",
+    "IntentType",
+    "Level",
+    "ConfidenceLevel",
+    "to_confidence_level",
+    "LLM_AGENTS",
+    "DETERMINISTIC_AGENTS",
+    "Entities",
+    "StructuredIntent",
+    "AgentTask",
+    "Evidence",
+    "ParameterAdvice",
+    "AgentResult",
+    "FinalAnswer",
+    "PerceptionEvent",
+    "TelemetryPoint",
+    "TelemetryResult",
+    "AlertDecision",
+]
