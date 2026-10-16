@@ -1,0 +1,231 @@
+"""知识库服务：文档上传、分块索引状态机、检索、删除级联、种子初始化。
+
+索引状态机：pending → indexing → ready / failed
+- create_document 落库 PENDING 后，默认以后台任务异步索引（生产语义）；
+  测试可传 background=False 后手动 await index_document，保证确定性。
+- 分块为纯 CPU 操作且 mock 文本短，后台任务一拍事件循环即可完成。
+检索沿用 sim 的关键词重合度评分（tag×2 / title×3 / 字符重合封顶 20），
+仅命中 READY 文档的分块；返回 dict 兼容报表知识 Agent 的现有消费方式。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import re
+from datetime import datetime, timezone
+
+import structlog
+
+from libs.api.errors import NotFoundError
+from libs.schemas.kb import IndexStatus, KBChunk, KBDocument
+from repositories.kb_repo import KBChunkRepository, KBDocumentRepository
+
+logger = structlog.get_logger(__name__)
+
+MAX_CHUNK_CHARS = 300
+_SENTENCE_SPLIT = re.compile(r"(?<=[。！？；\n])")
+
+# 领域关键词表：用于分块 tag 自动抽取（补充上传时人工 tags）
+DOMAIN_KEYWORDS: tuple[str, ...] = (
+    "H2S", "硫化氢", "供液不足", "泵效", "沉没度", "冲次", "抽油机",
+    "节流", "水合物", "结蜡", "采气", "钻压", "转速", "泥浆密度", "井涌",
+    "安全帽", "违规闯入", "动火", "应急", "撤离", "检修", "压力", "产量",
+)
+
+
+def chunk_text(text: str, max_chars: int = MAX_CHUNK_CHARS) -> list[str]:
+    """结构感知分块：优先按段落切，长段按句子边界切，过短相邻段合并。"""
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    blocks: list[str] = []
+    for para in paragraphs:
+        if len(para) <= max_chars:
+            blocks.append(para)
+            continue
+        sentences = [s for s in _SENTENCE_SPLIT.split(para) if s.strip()]
+        buf = ""
+        for sent in sentences:
+            if buf and len(buf) + len(sent) > max_chars:
+                blocks.append(buf.strip())
+                buf = sent
+            else:
+                buf += sent
+        if buf.strip():
+            blocks.append(buf.strip())
+    # 合并过短相邻块，避免碎块
+    merged: list[str] = []
+    for block in blocks:
+        if merged and len(merged[-1]) + len(block) <= max_chars // 2:
+            merged[-1] = merged[-1] + "\n" + block
+        else:
+            merged.append(block)
+    return merged or [text.strip()]
+
+
+def extract_tags(text: str, extra: list[str] | None = None) -> list[str]:
+    """从文本抽取领域关键词作为 tag，并入人工指定 tags（去重保序）。"""
+    tags: list[str] = []
+    for kw in DOMAIN_KEYWORDS:
+        if kw in text and kw not in tags:
+            tags.append(kw)
+    for tag in extra or []:
+        if tag and tag not in tags:
+            tags.append(tag)
+    return tags
+
+
+class KBService:
+    """知识库领域服务（每个依赖容器持有一个实例）。"""
+
+    def __init__(self, doc_repo: KBDocumentRepository,
+                 chunk_repo: KBChunkRepository) -> None:
+        self._docs = doc_repo
+        self._chunks = chunk_repo
+        self._tasks: set[asyncio.Task] = set()
+
+    # ---------------- 上传与索引 ----------------
+
+    async def create_document(
+        self,
+        title: str,
+        doc_type: str,
+        source_ref: str,
+        text: str,
+        tags: list[str] | None = None,
+        *,
+        background: bool = True,
+    ) -> KBDocument:
+        """上传文档：落库 PENDING 并触发索引（默认后台任务）。"""
+        doc = KBDocument(
+            title=title, doc_type=doc_type, source_ref=source_ref,
+            text=text, tags=list(tags or []),
+        )
+        await self._docs.save(doc)
+        logger.info("kb.doc_created", doc_id=doc.doc_id, title=title,
+                    doc_type=doc_type)
+        if background:
+            task = asyncio.create_task(self.index_document(doc.doc_id))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+        else:
+            await self.index_document(doc.doc_id)
+        return doc
+
+    async def index_document(self, doc_id: str) -> KBDocument:
+        """执行索引：pending/failed → indexing → ready（异常落 failed + error）。"""
+        doc = await self._docs.get_by_id(doc_id)
+        if doc is None:
+            raise NotFoundError(f"知识库文档不存在：{doc_id}")
+
+        def _to_indexing(d: KBDocument) -> None:
+            d.status = IndexStatus.INDEXING
+            d.error = None
+            d.updated_at = datetime.now(timezone.utc)
+
+        await self._docs.update(doc_id, _to_indexing)
+        try:
+            # 重建语义：先清旧分块再切新块，保证 reindex 幂等
+            await self._chunks.delete_by_doc(doc_id)
+            blocks = chunk_text(doc.text)
+            chunks = [
+                KBChunk(doc_id=doc_id, seq=i, text=block,
+                        tags=extract_tags(doc.title + "\n" + block, doc.tags))
+                for i, block in enumerate(blocks)
+            ]
+            await self._chunks.save_all(chunks)
+
+            def _to_ready(d: KBDocument) -> None:
+                d.status = IndexStatus.READY
+                d.chunk_count = len(chunks)
+                d.updated_at = datetime.now(timezone.utc)
+
+            await self._docs.update(doc_id, _to_ready)
+            logger.info("kb.doc_indexed", doc_id=doc_id, chunks=len(chunks))
+        except Exception as exc:  # noqa: BLE001 - 索引失败需落库可重试
+            logger.exception("kb.doc_index_failed", doc_id=doc_id)
+
+            def _to_failed(d: KBDocument) -> None:
+                d.status = IndexStatus.FAILED
+                d.error = str(exc)[:200]
+                d.updated_at = datetime.now(timezone.utc)
+
+            await self._docs.update(doc_id, _to_failed)
+            raise
+        return await self._docs.get_by_id(doc_id)  # type: ignore[return-value]
+
+    async def reindex(self, doc_id: str) -> KBDocument:
+        """重建索引（failed/ready 均可），幂等。"""
+        return await self.index_document(doc_id)
+
+    # ---------------- 检索 ----------------
+
+    async def search(self, query: str, top_k: int = 3,
+                     doc_type: str | None = None) -> list[dict]:
+        """关键词重合度检索（mock RAG），仅命中 READY 文档的分块。
+
+        返回 dict（含 id/source_ref/type/title/text/tags/score/doc_id/chunk_id），
+        与 sim.knowledge 条目结构兼容，供报表知识 Agent 与检索测试面板共用。
+        """
+        if not query:
+            return []
+        ready_docs = await self._docs.query(status=IndexStatus.READY,
+                                            doc_type=doc_type)
+        if not ready_docs:
+            return []
+        doc_map = {d.doc_id: d for d in ready_docs}
+        chunks = await self._chunks.list_ready(set(doc_map))
+
+        scored: list[tuple[int, KBChunk]] = []
+        for chunk in chunks:
+            doc = doc_map[chunk.doc_id]
+            tag_score = sum(2 for tag in chunk.tags if tag in query)
+            title_score = 3 if doc.title in query else 0
+            base = tag_score + title_score
+            if base == 0:
+                continue
+            char_score = sum(1 for ch in set(query)
+                             if ch.strip() and ch in chunk.text)
+            scored.append((base * 10 + min(char_score, 20), chunk))
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        hits: list[dict] = []
+        for score, chunk in scored[:top_k]:
+            doc = doc_map[chunk.doc_id]
+            hits.append({
+                "id": doc.doc_id,
+                "chunk_id": chunk.chunk_id,
+                "source_ref": doc.source_ref,
+                "type": doc.doc_type,
+                "title": doc.title,
+                "text": chunk.text,
+                "tags": chunk.tags,
+                "score": score,
+            })
+        return hits
+
+    # ---------------- 删除 ----------------
+
+    async def delete_document(self, doc_id: str) -> None:
+        """删除文档并级联删除其分块；不存在抛 404。"""
+        doc = await self._docs.get_by_id(doc_id)
+        if doc is None:
+            raise NotFoundError(f"知识库文档不存在：{doc_id}")
+        removed = await self._chunks.delete_by_doc(doc_id)
+        await self._docs.delete(doc_id)
+        logger.info("kb.doc_deleted", doc_id=doc_id, chunks_removed=removed)
+
+    # ---------------- 种子 ----------------
+
+    async def seed_defaults(self) -> int:
+        """文档库为空时灌入 sim 的 5 条规程/预案/案例（同步索引即 READY）。"""
+        if await self._docs.count() > 0:
+            return 0
+        from sim.knowledge import KB_ENTRIES
+
+        for entry in KB_ENTRIES:
+            await self.create_document(
+                title=entry["title"], doc_type=entry["type"],
+                source_ref=entry["source_ref"], text=entry["text"],
+                tags=list(entry["tags"]), background=False,
+            )
+        logger.info("kb.seeded", count=len(KB_ENTRIES))
+        return len(KB_ENTRIES)

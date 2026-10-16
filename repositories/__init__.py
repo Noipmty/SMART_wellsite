@@ -2,6 +2,7 @@
 
 from repositories.alert_repo import AlertRepository, WorkOrderRepository
 from repositories.base import BaseRepository, InMemoryRepository
+from repositories.kb_repo import KBChunkRepository, KBDocumentRepository
 from repositories.trace_repo import TraceRepository
 
 __all__ = [
@@ -10,4 +11,6 @@ __all__ = [
     "TraceRepository",
     "AlertRepository",
     "WorkOrderRepository",
+    "KBDocumentRepository",
+    "KBChunkRepository",
 ]

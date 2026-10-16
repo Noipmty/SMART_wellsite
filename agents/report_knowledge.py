@@ -16,7 +16,7 @@ from libs.schemas import (
     AgentTask,
     ReportKnowledgeOutput,
 )
-from sim.knowledge import search_knowledge
+from services.kb_service import KBService
 
 _ROLE = "报表知识"
 
@@ -24,8 +24,17 @@ _ROLE = "报表知识"
 class ReportKnowledgeAgent(BaseAgent):
     name = AgentName.REPORT_KNOWLEDGE
 
-    def __init__(self, llm: LLMClient) -> None:
+    def __init__(self, llm: LLMClient, kb_service: KBService | None = None) -> None:
         self._llm = llm
+        self._kb = kb_service
+
+    async def _search(self, question: str, top_k: int = 3) -> list[dict]:
+        """统一知识检索：容器注入 KBService 时走知识库；缺省回退 sim（测试兼容）。"""
+        if self._kb is not None:
+            return await self._kb.search(question, top_k=top_k)
+        from sim.knowledge import search_knowledge
+
+        return search_knowledge(question, top_k=top_k)
 
     async def _process(self, task: AgentTask) -> AgentResult:
         kind = task.payload.get("kind", "knowledge")
@@ -36,7 +45,7 @@ class ReportKnowledgeAgent(BaseAgent):
         if kind == "report":
             return await self._build_report(well, start, end, task)
 
-        entries = search_knowledge(question, top_k=3)
+        entries = await self._search(question, top_k=3)
         if not entries:
             return AgentResult(
                 agent=self.name, trace_id=task.trace_id,

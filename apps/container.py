@@ -16,8 +16,10 @@ from libs.eventbus import EventBus, create_eventbus
 from libs.llm import MockLLMClient
 from libs.llm.base import LLMClient
 from repositories.alert_repo import AlertRepository, WorkOrderRepository
+from repositories.kb_repo import KBChunkRepository, KBDocumentRepository
 from repositories.trace_repo import TraceRepository
 from services.alert_service import AlertService
+from services.kb_service import KBService
 from services.trace_recorder import TraceRecorder
 
 logger = structlog.get_logger(__name__)
@@ -34,6 +36,9 @@ class Container:
     alert_repo: AlertRepository
     order_repo: WorkOrderRepository
     alert_service: AlertService
+    kb_doc_repo: KBDocumentRepository
+    kb_chunk_repo: KBChunkRepository
+    kb_service: KBService
     orchestrator: Orchestrator
 
     @classmethod
@@ -52,8 +57,14 @@ class Container:
         alert_service = AlertService(alert_repo, order_repo)
         await alert_service.start_sweeper()
 
+        kb_doc_repo = KBDocumentRepository()
+        kb_chunk_repo = KBChunkRepository()
+        kb_service = KBService(kb_doc_repo, kb_chunk_repo)
+        await kb_service.seed_defaults()
+
         orchestrator = build_orchestrator(
-            llm_client, trace_recorder=trace_recorder, alert_service=alert_service
+            llm_client, trace_recorder=trace_recorder,
+            alert_service=alert_service, kb_service=kb_service,
         )
 
         logger.info("container.created")
@@ -65,6 +76,9 @@ class Container:
             alert_repo=alert_repo,
             order_repo=order_repo,
             alert_service=alert_service,
+            kb_doc_repo=kb_doc_repo,
+            kb_chunk_repo=kb_chunk_repo,
+            kb_service=kb_service,
             orchestrator=orchestrator,
         )
 

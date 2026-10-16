@@ -15,6 +15,7 @@ from libs.schemas.alerts import (
     WorkOrder,
     WorkOrderStatus,
 )
+from libs.schemas.kb import KBChunk, KBDocument, IndexStatus
 from libs.schemas.enums import (
     DETERMINISTIC_AGENTS,
     LLM_AGENTS,
@@ -62,6 +63,9 @@ __all__ = [
     "WorkOrder",
     "WorkOrderStatus",
     "EscalationRecord",
+    "KBDocument",
+    "KBChunk",
+    "IndexStatus",
     "DiagnosisOutput",
     "ProductionOutput",
     "RiskOutput",
