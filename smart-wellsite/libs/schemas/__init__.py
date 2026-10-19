@@ -1,0 +1,83 @@
+"""协作消息 Schema 包。"""
+
+from libs.schemas.agent_io import (
+    DiagnosisOutput,
+    ProductionOutput,
+    ReportKnowledgeOutput,
+    RiskOutput,
+    RoutingItem,
+    RoutingOutput,
+)
+from libs.schemas.alerts import (
+    Alert,
+    AlertStatus,
+    EscalationRecord,
+    WorkOrder,
+    WorkOrderStatus,
+)
+from libs.schemas.kb import (
+    CandidateStatus,
+    KBCandidate,
+    KBChunk,
+    KBDocument,
+    IndexStatus,
+)
+from libs.schemas.enums import (
+    DETERMINISTIC_AGENTS,
+    LLM_AGENTS,
+    AgentName,
+    ConfidenceLevel,
+    IntentType,
+    Level,
+    to_confidence_level,
+)
+from libs.schemas.messages import (
+    AgentResult,
+    AgentTask,
+    AlertDecision,
+    Entities,
+    Evidence,
+    FinalAnswer,
+    ParameterAdvice,
+    PerceptionEvent,
+    StructuredIntent,
+    TelemetryPoint,
+    TelemetryResult,
+)
+
+__all__ = [
+    "AgentName",
+    "IntentType",
+    "Level",
+    "ConfidenceLevel",
+    "to_confidence_level",
+    "LLM_AGENTS",
+    "DETERMINISTIC_AGENTS",
+    "Entities",
+    "StructuredIntent",
+    "AgentTask",
+    "Evidence",
+    "ParameterAdvice",
+    "AgentResult",
+    "FinalAnswer",
+    "PerceptionEvent",
+    "TelemetryPoint",
+    "TelemetryResult",
+    "AlertDecision",
+    "Alert",
+    "AlertStatus",
+    "WorkOrder",
+    "WorkOrderStatus",
+    "EscalationRecord",
+    "KBDocument",
+    "KBChunk",
+    "IndexStatus",
+    "KBCandidate",
+    "CandidateStatus",
+    "DiagnosisOutput",
+    "ProductionOutput",
+    "RiskOutput",
+    "ReportKnowledgeOutput",
+    "RoutingItem",
+    "RoutingOutput",
+]
