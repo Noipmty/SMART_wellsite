@@ -1,0 +1,46 @@
+/* ============ 暗色工业风色板（全局唯一事实源） ============ */
+:root {
+  --bg-base: #0d1117;        /* 页面底 */
+  --bg-panel: #161b22;       /* 卡片/面板 */
+  --bg-elevated: #1f262e;    /* 悬浮/选中 */
+  --bg-input: #0b0f14;
+  --border: #30363d;
+  --border-strong: #484f58;
+
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-disabled: #6e7681;
+
+  --accent: #2f81f7;         /* 主色/交互蓝 */
+  --accent-hover: #4a94ff;
+  --accent-dim: rgba(47, 129, 247, 0.14);
+
+  /* 告警等级色（暗底高辨识） */
+  --level-critical: #f85149; /* 紧急 红 */
+  --level-warning: #d29922;  /* 预警 橙 */
+  --level-info: #58a6ff;     /* 提醒 蓝 */
+  --level-watch: #bc8cff;    /* 提示 紫（后端 Level 共四档：提示/提醒/预警/紧急） */
+  --level-ok: #3fb950;       /* 正常 绿 */
+
+  --success: #3fb950;
+  --danger: #f85149;
+  --warning: #d29922;
+
+  /* 候选来源色 */
+  --source-workorder: #58a6ff;
+  --source-alert: #d29922;
+  --source-trace: #bc8cff;
+
+  /* 等宽数字字体 */
+  --font-mono: 'JetBrains Mono', 'DIN Alternate', Consolas, 'Courier New', monospace;
+  --font-sans: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+
+  --radius-card: 8px;
+  --radius-btn: 6px;
+  --radius-tag: 4px;
+
+  --topbar-h: 56px;
+  --nav-w: 200px;
+  --nav-w-collapsed: 72px;
+  --panel-w: 360px;
+}

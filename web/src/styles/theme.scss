@@ -1,0 +1,49 @@
+/* ============ Element Plus 暗色主题深度覆盖 ============ */
+/* 通过 CSS 变量覆盖，使 Element 组件观感与工业色板一致，禁止使用默认蓝/默认灰底 */
+
+@forward 'element-plus/theme-chalk/src/dark/var.scss' with (
+  $colors: (
+    'primary': ('base': #2f81f7),
+    'success': ('base': #3fb950),
+    'warning': ('base': #d29922),
+    'danger':  ('base': #f85149),
+    'error':   ('base': #f85149),
+    'info':    ('base': #8b949e),
+  ),
+  $bg-color: (
+    'page':   #0d1117,
+    '':       #161b22,
+    'overlay':#1f262e,
+  ),
+  $fill-color: (
+    '':            #1f262e,
+    'light':       #232b34,
+    'lighter':     #1a212a,
+    'extra-light': #171d25,
+    'dark':        #28303a,
+    'darker':      #30363d,
+    'blank':       #161b22,
+  ),
+  $border-color: (
+    '':       #30363d,
+    'light':  #30363d,
+    'lighter': #262c34,
+    'extra-light': #21262d,
+    'dark':   #484f58,
+    'darker': #484f58,
+  ),
+  $text-color: (
+    'primary':   #e6edf3,
+    'regular':   #c9d1d9,
+    'secondary': #8b949e,
+    'placeholder':#6e7681,
+    'disabled':  #6e7681,
+  )
+);
+
+/* 圆角不属于可配置 sass 变量，直接用 CSS 变量覆盖（工业风克制圆角） */
+:root {
+  --el-border-radius-base: 6px;
+  --el-border-radius-small: 4px;
+  --el-border-radius-round: 16px;
+}

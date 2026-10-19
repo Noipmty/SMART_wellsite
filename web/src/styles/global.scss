@@ -1,0 +1,102 @@
+/* ============ 全局基础样式 ============ */
+@use './theme.scss';
+@import './variables.css';
+@import 'element-plus/dist/index.css';
+@import 'element-plus/theme-chalk/dark/css-vars.css';
+
+* { box-sizing: border-box; }
+
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 数字/井号/指标值统一等宽 */
+.mono, .num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #59616c; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* 通用卡片 */
+.panel-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+
+/* 过渡统一 150-200ms ease-out */
+.fade-enter-active, .fade-leave-active { transition: opacity 0.18s ease-out; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+
+/* 超时告警红色脉冲呼吸（2s 循环） */
+@keyframes alarm-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(248, 81, 73, 0); }
+  50%      { box-shadow: 0 0 12px 2px rgba(248, 81, 73, 0.55); }
+}
+.alarm-overtime {
+  animation: alarm-pulse 2s ease-in-out infinite;
+  border-color: var(--level-critical) !important;
+}
+
+/* Agent 节点运行中流光边框 */
+@keyframes agent-running {
+  0%   { box-shadow: 0 0 0 0 rgba(47, 129, 247, .5); }
+  100% { box-shadow: 0 0 0 7px rgba(47, 129, 247, 0); }
+}
+.agent-running {
+  animation: agent-running 1.1s ease-out infinite;
+  border-color: var(--accent) !important;
+}
+
+/* 完成绿色闪烁 */
+@keyframes flash-green {
+  0% { box-shadow: 0 0 0 0 rgba(63, 185, 80, .7); }
+  100% { box-shadow: 0 0 0 10px rgba(63, 185, 80, 0); }
+}
+.flash-success { animation: flash-green 0.9s ease-out 1; }
+
+/* 图谱新增节点高亮渐隐（3s） */
+@keyframes node-new {
+  0%   { box-shadow: 0 0 0 0 rgba(63, 185, 80, .8); background: rgba(63,185,80,.16); }
+  100% { box-shadow: 0 0 0 12px rgba(63, 185, 80, 0); background: transparent; }
+}
+.node-new { animation: node-new 3s ease-out 1 forwards; }
+
+/* 可点击最小区域 & hover 反馈 */
+.clickable {
+  cursor: pointer;
+  transition: background 0.15s ease-out, border-color 0.15s ease-out;
+  &:hover { background: var(--bg-elevated); }
+}
+
+/* Element 细节修正：去默认观感 */
+.el-button { border-radius: var(--radius-btn); }
+.el-card, .el-dialog, .el-drawer { --el-card-border-color: var(--border); }
+.el-dialog { background: var(--bg-panel); border: 1px solid var(--border-strong); border-radius: var(--radius-card); }
+.el-message-box { background: var(--bg-panel); border: 1px solid var(--border-strong); }
+.el-popper.is-dark { background: var(--bg-elevated); border-color: var(--border-strong); }
+.el-tag { border-radius: var(--radius-tag); }
+.el-input__wrapper, .el-textarea__inner, .el-select__wrapper {
+  background: var(--bg-input) !important;
+  box-shadow: 0 0 0 1px var(--border) inset !important;
+}
+.el-input__wrapper.is-focus, .el-select__wrapper.is-focused {
+  box-shadow: 0 0 0 1px var(--accent) inset !important;
+}
+.el-table { --el-table-bg-color: var(--bg-panel); --el-table-tr-bg-color: var(--bg-panel); --el-table-header-bg-color: var(--bg-elevated); }
