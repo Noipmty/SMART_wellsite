@@ -1,6 +1,7 @@
 """API 层测试：健康检查与对话入口（含编排链路）。"""
 
 import pytest
+from datetime import datetime
 from fastapi.testclient import TestClient
 
 from apps.gateway.main import create_app
@@ -215,7 +216,13 @@ def test_telemetry_passthrough_with_gap_and_events():
         assert body["tag"] == "W3.daily_oil_prod"
         assert body["metric"] == "井口日产量"
         assert body["unit"] == "t/d"
-        assert len(body["series"]) == 21  # 24 小时 - 3 小时缺口（02/03/04 点）
+        # 新语义：不返回未来时刻数据——所有点不晚于当前墙钟（整点 + 可选实时点）
+        now_s = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        assert all(p["ts"] <= now_s for p in body["series"])
+        # 02/03/04 整点为缺口，不出现
+        hour_points = [p for p in body["series"] if len(p["ts"]) == 16]
+        assert hour_points, "应至少包含整点序列"
+        assert not any(p["ts"][11:16] in ("02:00", "03:00", "04:00") for p in hour_points)
         assert body["quality"]["gap"] == [f"{DATE} 02:00~{DATE} 04:00"]
         assert body["events"]
         assert body["events"][0]["type"] == "异常"

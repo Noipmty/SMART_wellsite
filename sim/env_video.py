@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 from libs.schemas import PerceptionEvent, TelemetryPoint
 from sim.scada import parse_dt
-from sim.timebase import DATE, at
+from sim.timebase import at, today_str
 
 _FMT = "%Y-%m-%d %H:%M"
 
@@ -26,7 +26,7 @@ ENV_BASE: dict[str, float] = {"H2S": 2.0, "可燃气体": 4.0, "CO": 3.0}
 # 环境场景：(well, metric) → 爬升参数
 ENV_SCENARIOS: dict[tuple[str, str], dict] = {
     ("W-7", "H2S"): {
-        "date": DATE,
+        "date": today_str(),
         "ramp_start": at(0, "12:00"),
         "ramp_end": at(0, "15:30"),
         "from_val": 3.0,
