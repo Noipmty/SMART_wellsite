@@ -168,6 +168,33 @@ class KBService:
         """重建索引（failed/ready 均可），幂等。"""
         return await self.index_document(doc_id)
 
+    async def update_document(
+        self,
+        doc_id: str,
+        *,
+        title: str | None = None,
+        text: str | None = None,
+    ) -> KBDocument:
+        """更新文档标题/正文；正文变更时同步重建索引（READY 终态）。"""
+        doc = await self._docs.get_by_id(doc_id)
+        if doc is None:
+            raise NotFoundError(f"知识库文档不存在：{doc_id}")
+        now = datetime.now(timezone.utc)
+
+        def _apply(d: KBDocument) -> None:
+            if title is not None:
+                d.title = title
+            if text is not None:
+                d.text = text
+            d.updated_at = now
+
+        await self._docs.update(doc_id, _apply)
+        if text is not None:
+            await self.index_document(doc_id)
+        logger.info("kb.doc_updated", doc_id=doc_id,
+                    title_changed=title is not None, reindexed=text is not None)
+        return await self._docs.get_by_id(doc_id)  # type: ignore[return-value]
+
     # ---------------- 检索 ----------------
 
     async def search(self, query: str, top_k: int = 3,

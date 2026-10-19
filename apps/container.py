@@ -53,27 +53,53 @@ class Container:
     @classmethod
     async def create(cls) -> "Container":
         """初始化全部基础设施与领域服务。"""
+        from configs import get_settings
+
+        settings = get_settings()
         eventbus = create_eventbus()
         await eventbus.start()
 
         llm_client = MockLLMClient()
 
-        trace_repo = TraceRepository()
+        # ---- 仓储装配：memory=内存/mock 语义；pg=PostgreSQL 持久化 ----
+        pg_pool = None
+        if settings.repo_backend == "pg":
+            from libs.db import get_pg_pool
+            from repositories.pg import PgRepositories, run_ddl
+            from repositories.pg.seed import seed_alerts_orders, seed_extra_kb_docs
+
+            pg_pool = await get_pg_pool()
+            await run_ddl(pg_pool)
+            repos = PgRepositories(pg_pool)
+            trace_repo = repos.trace_repo
+            alert_repo = repos.alert_repo
+            order_repo = repos.order_repo
+            kb_doc_repo = repos.kb_doc_repo
+            kb_chunk_repo = repos.kb_chunk_repo
+            kb_candidate_repo = repos.kb_candidate_repo
+            graph_repo = repos.graph_repo
+        else:
+            trace_repo = TraceRepository()
+            alert_repo = AlertRepository()
+            order_repo = WorkOrderRepository()
+            kb_doc_repo = KBDocumentRepository()
+            kb_chunk_repo = KBChunkRepository()
+            kb_candidate_repo = KBCandidateRepository()
+            graph_repo = GraphRepository()
+
         trace_recorder = TraceRecorder(trace_repo)
 
-        alert_repo = AlertRepository()
-        order_repo = WorkOrderRepository()
         alert_service = AlertService(alert_repo, order_repo)
         await alert_service.start_sweeper()
 
-        kb_doc_repo = KBDocumentRepository()
-        kb_chunk_repo = KBChunkRepository()
-        kb_candidate_repo = KBCandidateRepository()
         kb_service = KBService(kb_doc_repo, kb_chunk_repo, kb_candidate_repo)
         await kb_service.seed_defaults()
         alert_service.set_kb_service(kb_service)  # 启用经验自进化沉淀钩子
 
-        graph_repo = GraphRepository()
+        if settings.repo_backend == "pg":
+            await seed_alerts_orders(alert_repo, order_repo, kb_candidate_repo)
+            await seed_extra_kb_docs(kb_service)
+
         graph_service = GraphService(graph_repo, kb_doc_repo, kb_chunk_repo)
         await graph_service.rebuild(background=False)  # 启动即基于种子 KB 建图
 
@@ -82,7 +108,7 @@ class Container:
             alert_service=alert_service, kb_service=kb_service,
         )
 
-        logger.info("container.created")
+        logger.info("container.created", repo_backend=settings.repo_backend)
         return cls(
             eventbus=eventbus,
             llm_client=llm_client,
@@ -104,4 +130,7 @@ class Container:
         """按依赖反方向释放资源。"""
         await self.alert_service.stop_sweeper()
         await self.eventbus.stop()
+        from libs.db import close_connections
+
+        await close_connections()
         logger.info("container.shutdown")

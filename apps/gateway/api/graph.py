@@ -14,7 +14,13 @@ from libs.api import (
     ServiceUnavailableError,
     pagination_params,
 )
-from libs.schemas.graph import EntityType, GraphBuildMeta, GraphCommunity, GraphNode
+from libs.schemas.graph import (
+    EntityType,
+    GraphBuildMeta,
+    GraphCommunity,
+    GraphEdge,
+    GraphNode,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -61,6 +67,24 @@ class RebuildAccepted(BaseModel):
     status: str
     version: int
     message: str
+
+
+class GraphDataView(BaseModel):
+    """全量图谱视图（mock 规模一次性下发，供图可视化渲染）。"""
+
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+    communities: list[GraphCommunity]
+
+
+@router.get("/data", response_model=GraphDataView)
+async def graph_data(request: Request) -> GraphDataView:
+    """全量图谱数据：节点 + 边 + 社区（供前端图渲染）。"""
+    container = _get_container(request)
+    nodes = await container.graph_repo.query_nodes()
+    edges = await container.graph_repo.list_edges()
+    communities = await container.graph_repo.list_communities()
+    return GraphDataView(nodes=nodes, edges=edges, communities=communities)
 
 
 @router.get("/stats", response_model=GraphStats)

@@ -89,6 +89,9 @@ class Settings(BaseSettings):
     # ---- 事件总线 ----
     eventbus_backend: Literal["memory", "mysql", "redis_stream"] = "mysql"
 
+    # ---- 仓储后端（memory=内存/mock 语义；pg=PostgreSQL 持久化） ----
+    repo_backend: Literal["memory", "pg"] = "memory"
+
     # ---- 安全 ----
     secret_key: str = "change-me-in-production"
     audit_log_enabled: bool = True

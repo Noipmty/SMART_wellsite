@@ -9,7 +9,28 @@ logger = structlog.get_logger(__name__)
 
 # PostgreSQL 连接池（懒加载）
 _pg_engine = None
+_pg_pool = None
 _redis_client = None
+
+
+async def get_pg_pool():
+    """获取 PostgreSQL asyncpg 连接池（异步仓储用）。"""
+    global _pg_pool
+    if _pg_pool is None:
+        import asyncpg
+
+        settings = get_settings()
+        _pg_pool = await asyncpg.create_pool(
+            host=settings.postgres_host,
+            port=settings.postgres_port,
+            database=settings.postgres_db,
+            user=settings.postgres_user,
+            password=settings.postgres_password,
+            min_size=1,
+            max_size=10,
+        )
+        logger.info("db.postgres.pool_ready", host=settings.postgres_host)
+    return _pg_pool
 
 
 def get_pg_engine():
@@ -47,7 +68,12 @@ def get_redis_client():
 
 async def close_connections() -> None:
     """关闭所有数据库连接。"""
-    global _pg_engine, _redis_client
+    global _pg_engine, _pg_pool, _redis_client
+
+    if _pg_pool:
+        await _pg_pool.close()
+        _pg_pool = None
+        logger.info("db.postgres.pool_closed")
 
     if _pg_engine:
         _pg_engine.dispose()

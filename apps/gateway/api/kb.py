@@ -157,6 +157,27 @@ async def reindex_document(doc_id: str, request: Request) -> DocumentView:
     return DocumentView.from_doc(doc)
 
 
+class UpdateDocumentRequest(BaseModel):
+    """更新文档请求体（至少一项）。"""
+
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    text: str | None = Field(default=None, min_length=1, max_length=20000)
+
+
+@router.patch("/documents/{doc_id}", response_model=DocumentView)
+async def update_document(doc_id: str, body: UpdateDocumentRequest,
+                          request: Request) -> DocumentView:
+    """更新文档标题/正文；正文变更同步重建索引。"""
+    if body.title is None and body.text is None:
+        raise BadRequestError("title 与 text 至少提供一项")
+    container = _get_container(request)
+    doc = await container.kb_service.update_document(
+        doc_id, title=body.title, text=body.text
+    )
+    logger.info("kb.api_doc_updated", doc_id=doc_id)
+    return DocumentView.from_doc(doc)
+
+
 @router.delete("/documents/{doc_id}", status_code=204)
 async def delete_document(doc_id: str, request: Request) -> Response:
     """删除文档并级联删除其全部分块；不存在返回统一 404。"""

@@ -13,6 +13,9 @@ os.environ.setdefault("ENV", "dev")
 os.environ.setdefault("EVENTBUS_BACKEND", "memory")
 os.environ.setdefault("LLM_PROVIDER", "mock")
 os.environ.setdefault("LANGSMITH_TRACING", "false")
+# 测试固定走内存仓储（.env 中 REPO_BACKEND=pg 不影响套件；
+# 环境变量优先级高于 .env，PG 集成测试见 test_pg_repos.py 显式开启）
+os.environ.setdefault("REPO_BACKEND", "memory")
 
 import pytest
 

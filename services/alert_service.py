@@ -194,6 +194,7 @@ class AlertService:
                 setattr(a, "acknowledged_by", operator),
                 setattr(a, "acknowledged_at", now),
             ),
+            note=f"{operator} 确认告警",
         )
 
     async def resolve(self, alert_id: str, operator: str, resolution: str) -> Alert:
@@ -205,11 +206,13 @@ class AlertService:
                 setattr(a, "resolved_at", now),
                 setattr(a, "resolution", resolution),
             ),
+            note=f"{operator} 解决：{resolution}",
         )
 
     async def _transition_alert(
         self, alert_id: str, target: AlertStatus, operator: str,
         apply,  # Callable[[Alert, datetime], None]
+        note: str = "",
     ) -> Alert:
         alert = await self._alerts.get_by_id(alert_id)
         if alert is None:
@@ -221,10 +224,16 @@ class AlertService:
                          "target": target.value},
             )
         now = datetime.now(timezone.utc)
+        from_status = alert.status
 
         def _apply(a: Alert) -> None:
             apply(a, now)
             a.status = target
+            a.escalations.append(EscalationRecord(
+                ts=now, kind="status",
+                from_level=from_status.value, to_level=target.value,
+                notified=[operator], note=note,
+            ))
 
         updated = await self._alerts.update(alert_id, _apply)
         logger.info("alert.transition", alert_id=alert_id,
@@ -242,6 +251,7 @@ class AlertService:
                 setattr(o, "assignee", assignee),
                 setattr(o, "actions_taken", actions_taken),
             ),
+            note=f"指派给 {assignee}",
         )
 
     async def resolve_order(self, order_id: str, operator: str,
@@ -253,6 +263,7 @@ class AlertService:
                 setattr(o, "resolution", resolution),
                 setattr(o, "resolved_at", now),
             ),
+            note=f"处置完成：{resolution}",
         )
 
     async def close_order(self, order_id: str, operator: str,
@@ -264,6 +275,7 @@ class AlertService:
                 setattr(o, "actual_cause", actual_cause),
                 setattr(o, "closed_at", now),
             ),
+            note=f"关闭工单，实际原因：{actual_cause}",
         )
         # 工单闭环 → 沉淀处置案例候选（幂等，失败不影响主流程）
         await self._distill_closed_order(order)
@@ -314,7 +326,7 @@ class AlertService:
 
     async def _transition_order(
         self, order_id: str, target: WorkOrderStatus, operator: str,
-        apply,
+        apply, note: str = "",
     ) -> WorkOrder:
         order = await self._orders.get_by_id(order_id)
         if order is None:
@@ -326,11 +338,17 @@ class AlertService:
                          "target": target.value},
             )
         now = datetime.now(timezone.utc)
+        from_status = order.status
 
         def _apply(o: WorkOrder) -> None:
             apply(o, now)
             o.status = target
             o.updated_at = now
+            o.escalations.append(EscalationRecord(
+                ts=now, kind="status",
+                from_level=from_status.value, to_level=target.value,
+                notified=[operator], note=note,
+            ))
 
         updated = await self._orders.update(order_id, _apply)
         logger.info("workorder.transition", order_id=order_id,
